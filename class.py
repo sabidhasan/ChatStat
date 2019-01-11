@@ -28,6 +28,7 @@ class ChatStat:
     self.authors = make_authors(raw_messages)
     self.parsed_messages = self.parse_messages()
     self.make_leave_counts()
+    self.enumerate_convo_killers()
 
   def parse_messages(self):
     """Combines multi line messages into one line. Returns array of Message objects."""
@@ -83,11 +84,46 @@ class ChatStat:
       times[m.time] += 1
     return times
 
+  def enumerate_convo_killers(self):
+    """Loop through messages, find who kills conversation"""
+
+    for (idx, msg) in enumerate(self.parsed_messages):
+      # Ignore first message, and if prev msg was same person
+      if idx == 0: continue
+      prev_msg = self.parsed_messages[idx-1]
+      if msg.author == prev_msg.author: continue
+
+      msg_dt = datetime.datetime.strptime(msg.get_date_time_text, '%Y-%m-%d %I:%M %p')
+      prev_msg_dt = datetime.datetime.strptime(prev_msg.get_date_time_text, '%Y-%m-%d %I:%M %p')
+      time_delta = (msg_dt - prev_msg_dt).total_seconds()
+      prev_msg.author._time_deltas.append(time_delta)
+
+  @property
+  def convo_killer(self):
+    return sorted(self.authors, key=lambda x: x.get_avg_response_time)
+
 class Author:
   """Class representing authors"""
   def __init__(self, name):
     self.name = name
     self.leave_count = 0
+    # List of time deltas from messages
+    self._time_deltas = []
+  
+  @property
+  def get_max_response_time(self):
+    return max(self._time_deltas)
+  
+  @property
+  def get_min_response_time(self):
+    return min(self._time_deltas)
+
+  @property
+  def get_avg_response_time(self):
+    try:
+      return round(sum(self._time_deltas) / 0) #len(self._time_deltas))
+    except:
+      raise ZeroDivisionError('Cannot calculate average response time, as no messages from', self.name)
 
   def __str__(self):
     return self.name
@@ -100,12 +136,12 @@ class Message():
     
     # DATE AND TIME RELATED STUFF
     date_time_text = raw_text[0].split(', ')
-    raw_date = date_time_text[0].strip()
+    self.raw_date = date_time_text[0].strip()
     # the replace is to convert "a.m." to "am"
-    raw_time = date_time_text[1].strip().replace('.', '')
-    self.day_of_week = datetime.datetime.strptime(raw_date, '%Y-%m-%d').strftime('%A')
-    self.month = int(raw_date.split('-')[1]) - 1
-    self.time = int(datetime.datetime.strptime(raw_time, '%I:%M %p').strftime('%H'))
+    self.raw_time = date_time_text[1].strip().replace('.', '')
+    self.day_of_week = datetime.datetime.strptime(self.raw_date, '%Y-%m-%d').strftime('%A')
+    self.month = int(self.raw_date.split('-')[1]) - 1
+    self.time = int(datetime.datetime.strptime(self.raw_time, '%I:%M %p').strftime('%H'))
 
     # AUTHOR
     self.author = find_author(raw_text[1].split(':')[0], authors)
@@ -118,7 +154,13 @@ class Message():
       # System message (subject changed, etc.) so ignore
       pass
     
+  @property
+  def get_date_time_text(self):
+    return self.raw_date + ' ' + self.raw_time
+
 with open('chat.txt') as data:
   raw_data = data.readlines()
   x = ChatStat(raw_data)
-  print(x.messages_by_day)
+  y = (x.convo_killer)
+  for author in y:
+    print (author, author.get_avg_response_time)
