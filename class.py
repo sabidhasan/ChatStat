@@ -65,8 +65,8 @@ class Author:
     self.name = name
     self.leave_count = None
 
-  # def __str__(self):
-  #   return self.name
+  def __str__(self):
+    return self.name
 
 class Message():
   """Class for individual message: date, time, mood, author, etc. """
