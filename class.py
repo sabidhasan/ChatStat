@@ -28,7 +28,7 @@ class ChatStat:
     self.authors = make_authors(raw_messages)
     self.parsed_messages = self.parse_messages()
     self.make_leave_counts()
-    self.enumerate_convo_killers()
+    self.populate_enumerable_properties()
 
   def parse_messages(self):
     """Combines multi line messages into one line. Returns array of Message objects."""
@@ -84,10 +84,13 @@ class ChatStat:
       times[m.time] += 1
     return times
 
-  def enumerate_convo_killers(self):
-    """Loop through messages, find who kills conversation"""
+  def populate_enumerable_properties(self):
+    """Loop through messages, find who kills conversation and update author msg counts"""
 
     for (idx, msg) in enumerate(self.parsed_messages):
+      # Update messages for author
+      msg.author._messages.append(msg)
+      
       # Ignore first message, and if prev msg was same person
       if idx == 0: continue
       prev_msg = self.parsed_messages[idx-1]
@@ -101,6 +104,29 @@ class ChatStat:
   @property
   def convo_killer(self):
     return sorted(self.authors, key=lambda x: x.get_avg_response_time)
+  
+  @property
+  def total_number_of_posts(self):
+    return len(self.parsed_messages)
+
+  @property
+  def post_count_by_author(self):
+    return list(map(lambda x: {'author': x, 'count': x.message_count},
+        sorted(self.authors, key=lambda x: x.message_count, reverse=True)))
+
+  @property
+  def longest_messages(self):
+    return list(
+      map(lambda x: {'author': x, 'longest_msg': x.longest_message, 'longest_msg_len': len(x.longest_message.text)},
+        sorted(self.authors, key=lambda x: len(x.longest_message.text), reverse=True)))
+
+  @property
+  def shortest_messages(self):
+    return list(
+      map(lambda x: {'author': x, 'shortest_msg': x.shortest_message, 'shortest_msg_len': len(x.shortest_message.text)},
+        sorted(self.authors, key=lambda x: len(x.shortest_message.text), reverse=False)))
+
+
 
 class Author:
   """Class representing authors"""
@@ -109,7 +135,25 @@ class Author:
     self.leave_count = 0
     # List of time deltas from messages
     self._time_deltas = []
+    # Message objects for all messages from this author
+    self._messages = []
   
+  @property
+  def message_count(self):
+    return len(self._messages)
+
+  @property
+  def longest_message(self):
+    return max(self._messages, key=lambda msg: len(msg.text))
+
+  @property
+  def message_length_histogram(self):
+    return [len(x.text) for x in self._messages]
+
+  @property
+  def shortest_message(self):
+    return min(self._messages, key=lambda msg: len(msg.text))
+
   @property
   def get_max_response_time(self):
     return max(self._time_deltas)
@@ -125,8 +169,8 @@ class Author:
     except:
       raise ZeroDivisionError('Cannot calculate average response time, as no messages from', self.name)
 
-  def __str__(self):
-    return self.name
+  def __repr__(self):
+    return "<ChatParticipant %s>" % self.name
 
 class Message():
   """Class for individual message: date, time, mood, author, etc. """
@@ -153,14 +197,38 @@ class Message():
     except IndexError:
       # System message (subject changed, etc.) so ignore
       pass
-    
+  
   @property
   def get_date_time_text(self):
     return self.raw_date + ' ' + self.raw_time
 
+  def __repr__(self):
+    return "<MessageObject %s>" % self.text
+
 with open('chat.txt') as data:
   raw_data = data.readlines()
   x = ChatStat(raw_data)
-  y = (x.convo_killer)
-  for author in y:
-    print (author, author.get_avg_response_time)
+  print(x.authors[7].message_length_histogram)
+  print (len(x.authors[7].message_length_histogram))
+  print (x.authors[7].message_count)
+  # for author in x.authors:
+  #   print(author.name, "\n", len(author.longest_message.text), "\n", author.longest_message.text,"\n\n")
+
+
+
+# What can be done:
+
+# messages_by_month
+# messages_by_day
+# messages_by_time
+# convo_killer
+# total_number_of_posts
+# post_count_by_author
+
+# for any author::::
+# message_count
+# longest_message
+# shortest_message
+# get_max_response_time
+# get_min_response_time
+# get_avg_response_time
