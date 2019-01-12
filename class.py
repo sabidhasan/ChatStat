@@ -1,4 +1,4 @@
-import re, datetime
+import re, datetime, numpy
 
 def make_authors(raw_messages):
   """Returns array of author objects"""
@@ -59,6 +59,25 @@ class ChatStat:
           # This was a person who never sent any messages, so ignore
           pass
 
+  def populate_enumerable_properties(self):
+    """Loop through messages, find who kills conversation, update author messages,
+    and update mentions for that author
+    """
+
+    for (idx, msg) in enumerate(self.parsed_messages):
+      # Update messages for author
+      msg.author._messages.append(msg)
+
+      # Ignore first message, and if prev msg was same person
+      if idx == 0: continue
+      prev_msg = self.parsed_messages[idx-1]
+      if msg.author == prev_msg.author: continue
+
+      msg_dt = datetime.datetime.strptime(msg.get_date_time_text, '%Y-%m-%d %I:%M %p')
+      prev_msg_dt = datetime.datetime.strptime(prev_msg.get_date_time_text, '%Y-%m-%d %I:%M %p')
+      time_delta = (msg_dt - prev_msg_dt).total_seconds()
+      prev_msg.author._time_deltas.append(time_delta)
+
   @property
   def messages_by_month(self):
     months = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0}
@@ -83,23 +102,6 @@ class ChatStat:
         times[m.time] = 0
       times[m.time] += 1
     return times
-
-  def populate_enumerable_properties(self):
-    """Loop through messages, find who kills conversation and update author msg counts"""
-
-    for (idx, msg) in enumerate(self.parsed_messages):
-      # Update messages for author
-      msg.author._messages.append(msg)
-      
-      # Ignore first message, and if prev msg was same person
-      if idx == 0: continue
-      prev_msg = self.parsed_messages[idx-1]
-      if msg.author == prev_msg.author: continue
-
-      msg_dt = datetime.datetime.strptime(msg.get_date_time_text, '%Y-%m-%d %I:%M %p')
-      prev_msg_dt = datetime.datetime.strptime(prev_msg.get_date_time_text, '%Y-%m-%d %I:%M %p')
-      time_delta = (msg_dt - prev_msg_dt).total_seconds()
-      prev_msg.author._time_deltas.append(time_delta)
 
   @property
   def convo_killer(self):
@@ -126,8 +128,6 @@ class ChatStat:
       map(lambda x: {'author': x, 'shortest_msg': x.shortest_message, 'shortest_msg_len': len(x.shortest_message.text)},
         sorted(self.authors, key=lambda x: len(x.shortest_message.text), reverse=False)))
 
-
-
 class Author:
   """Class representing authors"""
   def __init__(self, name):
@@ -137,6 +137,8 @@ class Author:
     self._time_deltas = []
     # Message objects for all messages from this author
     self._messages = []
+    # How many times this person has mentioned other people (keys are author objects)
+    self.mentions = {}
   
   @property
   def message_count(self):
@@ -149,6 +151,10 @@ class Author:
   @property
   def message_length_histogram(self):
     return [len(x.text) for x in self._messages]
+  
+  @property
+  def message_length_stdev(self):
+    return round(numpy.std(numpy.array(self.message_length_histogram)), 1)
 
   @property
   def shortest_message(self):
@@ -208,9 +214,9 @@ class Message():
 with open('chat.txt') as data:
   raw_data = data.readlines()
   x = ChatStat(raw_data)
-  print(x.authors[7].message_length_histogram)
-  print (len(x.authors[7].message_length_histogram))
-  print (x.authors[7].message_count)
+  # print(x.authors[7].message_length_histogram)
+  # print (len(x.authors[7].message_length_histogram))
+  print (x.authors[7].message_length_stdev)
   # for author in x.authors:
   #   print(author.name, "\n", len(author.longest_message.text), "\n", author.longest_message.text,"\n\n")
 
@@ -232,3 +238,6 @@ with open('chat.txt') as data:
 # get_max_response_time
 # get_min_response_time
 # get_avg_response_time
+
+
+# plot leave count vs messages sent
