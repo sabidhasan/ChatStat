@@ -1,4 +1,4 @@
-import re, datetime, numpy
+import re, datetime, numpy, json, nltk, pickle, sys, math
 
 def make_authors(raw_messages):
   """Returns array of author objects"""
@@ -20,7 +20,7 @@ def find_author(name, authors):
 
 class ChatStat:
   """Base class for ChatStat"""
-  def __init__(self, raw_messages):
+  def __init__(self, raw_messages, mood_training_strength = 1000):
     if raw_messages is None:
       raise InputError("No messages provided")
 
@@ -29,6 +29,7 @@ class ChatStat:
     self.parsed_messages = self.parse_messages()
     self.make_leave_counts()
     self.populate_enumerable_properties()
+    self.message_classifier = MessageSentiment(mood_training_strength)
 
   def parse_messages(self):
     """Combines multi line messages into one line. Returns array of Message objects."""
@@ -128,6 +129,38 @@ class ChatStat:
       map(lambda x: {'author': x, 'shortest_msg': x.shortest_message, 'shortest_msg_len': len(x.shortest_message.text)},
         sorted(self.authors, key=lambda x: len(x.shortest_message.text), reverse=False)))
 
+  @property
+  def average_author_sentiment(self):
+    ret = {}
+    skip_count = 0
+
+    for author in self.authors:
+      ret[author] = {'positive': 0, 'negative': 0, 'neutral': 0, 'negativity_ratio': 0}
+      for msg in author._messages:
+        if msg.mood is None:
+          skip_count += 1
+        else:
+          ret[author][msg.mood[0]] += 1
+      try:
+        ret[author]['negativity_ratio'] = ret[author]['negative'] / ret[author]['positive']
+      except ZeroDivisionError:
+        ret[author]['negativity_ratio'] = 0
+    if skip_count != 0:
+      print("{} messages were skipped, as they have not been classified".format(skip_count))
+    return sorted([{'author': a, 'message_mood': data} for (a, data) in ret.items()], key=lambda x: x['message_mood']['negativity_ratio'])
+
+  def classify_messages(self):
+    if input("This may take awhile for a lot of messages. Proceed? [y / _n_]") == "y":
+      one_bar = round(self.total_number_of_posts / 20)
+      for (i, msg) in enumerate(self.parsed_messages):
+        msg.mood = self.message_classifier.get_mood(msg.text)
+        progress = '#' * math.floor(i / one_bar) + ' ' * (19 - (round(i / one_bar)))
+        sys.stdout.write("Classifying Messages [{}]      {:06d}/{:06d}\r".format(progress, i+1, self.total_number_of_posts))
+        sys.stdout.flush()
+      print("\n")
+    else:
+      print("Aborting")
+      
 class Author:
   """Class representing authors"""
   def __init__(self, name):
@@ -178,7 +211,7 @@ class Author:
   def __repr__(self):
     return "<ChatParticipant %s>" % self.name
 
-class Message():
+class Message:
   """Class for individual message: date, time, mood, author, etc. """
   def __init__(self, index, raw_text, authors):
     raw_text = raw_text.split(' - ')
@@ -198,11 +231,12 @@ class Message():
 
     # TEXT
     self.text = None
+    self.mood = None
     try:
       self.text = raw_text[1].split(':')[1].strip()
     except IndexError:
       # System message (subject changed, etc.) so ignore
-      pass
+      self.text = ""
   
   @property
   def get_date_time_text(self):
@@ -211,12 +245,110 @@ class Message():
   def __repr__(self):
     return "<MessageObject %s>" % self.text
 
-with open('chat.txt') as data:
-  raw_data = data.readlines()
-  x = ChatStat(raw_data)
+class MessageSentiment:
+  """Generate mood sentiments for messages"""
+  MINIMUM_CERTAINTY_PROBABILITY = 0.85
+  TRAINING_SET_SIZE = 5000
+
+  try:
+    STOP_WORDS = set(nltk.corpus.stopwords.words('english'))
+  except:
+    nltk.download('stopwords')
+    STOP_WORDS = set(nltk.corpus.stopwords.words('english'))
+
+  def __init__(self, training_size = 5000):
+    """Generates the classifier for NB analysis of messages"""
+    self.TRAINING_SET_SIZE = training_size
+    self.tweets = self.make_tweets()
+    self.word_features = self.make_word_features()
+    self.classifier = self.get_saved_classifier()
+    if self.classifier is None:
+      # Must generate new classifier
+      self.classifier = self.generate_classfier_from_twitter()
+      self.save_classifier()
+
+  def make_tweets(self):
+    raw_tweets = []
+    with open('negative_tweets.json') as txt:
+      for line in txt.readlines()[:self.TRAINING_SET_SIZE]:
+        tup = (json.loads(line)['text'], 'negative')
+        raw_tweets.append(tup)
+    with open('positive_tweets.json') as txt:
+      for line in txt.readlines()[:self.TRAINING_SET_SIZE]:
+        tup = (json.loads(line)['text'], 'positive')
+        raw_tweets.append(tup)
+    # Combine negative and positive tweets
+    parsed_tweets = []
+    for (words, sentiment) in raw_tweets:
+      words_filtered = [e.lower() for e in words.split() if self.is_real_word(e)]
+      parsed_tweets.append((words_filtered, sentiment))
+    # Make and return word features
+    return parsed_tweets
+
+  def is_real_word(self, word):
+    return len(word) >= 3 and word not in self.STOP_WORDS
+
+  def make_word_features(self):
+    wordlist = []
+    for (words, sentiment) in self.tweets:
+      wordlist.extend(words)
+    return nltk.FreqDist(wordlist).keys()
+
+  def get_saved_classifier(self):
+    """Return memozied data; if none exists, then make empty DB"""
+    with open("classifier.pkl", "rb") as pkl_db:
+      memoized_data = pickle.load(pkl_db)
+      if memoized_data['classifier'] is not None:
+        return memoized_data['classifier']
+    return None
+
+  def generate_classfier_from_twitter(self):
+    print("Generating training set...")
+    training_set = nltk.classify.apply_features(self.extract_features, self.tweets)
+    return nltk.NaiveBayesClassifier.train(training_set)
+
+  def extract_features(self, document):
+    document_words = set(document)
+    features = {}
+    for word in self.word_features:
+      features['contains(%s)' % word] = (word in document_words)
+    return features
+
+  def save_classifier(self):
+    with open("classifier.pkl", "wb") as pkl_db:
+      print('Pickling classifier')
+      pickle.dump({'classifier': self.classifier}, pkl_db)
+
+  def classify_text(self, text_features):
+    prob = self.classifier.prob_classify(text_features)
+    (prob_pos, prob_neg) = prob.prob('positive'), prob.prob('negative')
+    
+    if prob_neg > self.MINIMUM_CERTAINTY_PROBABILITY:
+      classification = "negative"
+    elif prob_pos > self.MINIMUM_CERTAINTY_PROBABILITY:
+      classification = "positive"
+    else:
+      classification = "neutral"
+
+    return (classification, max(prob_neg, prob_pos))
+
+  def get_mood(self, text):
+    parsed_text = [word for word in text.split() if self.is_real_word(word)]
+    return self.classify_text(self.extract_features(parsed_text))
+
+
+
+# with open('chat.txt') as data:
+#   raw_data = data.readlines()
+#   x = ChatStat(raw_data)
+#   x.classify_messages()
+#   print(x.average_author_sentiment)
+  # for msg in x.parsed_messages:
+  #   print (msg.text[0:50], "\t", msg.mood)
   # print(x.authors[7].message_length_histogram)
   # print (len(x.authors[7].message_length_histogram))
-  print (x.authors[7].message_length_stdev)
+  # y = MessageSentiment()
+  # print (x.authors[7].message_length_stdev)
   # for author in x.authors:
   #   print(author.name, "\n", len(author.longest_message.text), "\n", author.longest_message.text,"\n\n")
 
