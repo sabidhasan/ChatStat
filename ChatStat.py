@@ -6,6 +6,8 @@ import re, datetime, numpy, json, nltk, pickle, sys, math
 
 class ChatStat:
   """Base class for ChatStat"""
+  __version__ = '1.0'
+
   def __init__(self, raw_messages, mood_training_strength = 1000):
     if raw_messages is None:
       raise InputError("No messages provided")
