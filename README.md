@@ -84,4 +84,4 @@ To Do
 
 License
 ---------
-Mypy is licensed under the terms of the MIT License (see the file LICENSE).
+ChatStat is licensed under the terms of the MIT License (see the file LICENSE).
