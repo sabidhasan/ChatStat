@@ -8,7 +8,7 @@ def make_authors(raw_messages):
     try:
       if re.match(r'\d{4}', line) and ':' in line.split(' - ')[1]:
         ret.add(line.split(' - ')[1].split(':')[0].strip())
-    except IndexError:
+    except:
       # line starts with 4 digits (like addresses, etc.)
       pass
   return [Author(author) for author in ret]

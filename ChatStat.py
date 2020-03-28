@@ -10,10 +10,11 @@ class ChatStat:
 
   def __init__(self, raw_messages, mood_training_strength = 1000):
     if raw_messages is None:
-      raise InputError("No messages provided")
+      raise ValueError("No messages provided")
 
-    self.raw_messages = raw_messages
-    self.authors = make_authors(raw_messages)
+    # Parse messages from bytes-like objects to string, and remove whitespace
+    self.raw_messages = [msg.decode("utf-8").strip() for msg in raw_messages]
+    self.authors = make_authors(self.raw_messages)
     self.parsed_messages = self.parse_messages()
     self.make_leave_counts()
     self.populate_enumerable_properties()
@@ -23,7 +24,6 @@ class ChatStat:
     """Combines multi line messages into one line. Returns array of Message objects."""
     ret = []
     for line in self.raw_messages:
-      line = line.strip()
       try:
         # Check for non-time stamped lines (so a multi-line message), add to prev msg
         if not(re.match(r'\d{4}', line)):
@@ -31,6 +31,8 @@ class ChatStat:
         # check for author (denoted by "Author: Message Text")
         elif ':' in line.split(' - ')[1]:
           ret.append(line)
+      except TypeError:
+        continue
       except IndexError:
         # Occurs for special messages like addresses that start with new line
         ret[-1] += line
@@ -39,7 +41,6 @@ class ChatStat:
   def make_leave_counts(self):
     """Takes raw messages, and returns dictionary of leave counts by author."""
     for line in self.raw_messages:
-      line = line.strip()
       if re.match(r'\d{4}', line) and ' left' in line and not(':' in line.split(' - ')[1]):
         try:
           author = find_author(line.split(' - ')[1].split(' left')[0].strip(), self.authors)
@@ -158,7 +159,6 @@ class ChatStat:
     if input("This may take awhile for a lot of messages. Proceed? [y / (n)]") == "y":
       one_bar = round(self.total_number_of_posts / 20)
       for (i, msg) in enumerate(self.parsed_messages):
-        # if i > 4000: continue
         msg.mood = self.message_classifier.get_mood(msg.text)
         progress = '#' * math.floor(i / one_bar) + ' ' * (19 - (round(i / one_bar)))
         sys.stdout.write("Classifying Messages [{}]      {:06d}/{:06d}\r".format(progress, i+1, self.total_number_of_posts))
@@ -168,9 +168,11 @@ class ChatStat:
       print("Aborting message classification")
 
   def __repr__(self):
-    return "<ChatStat Object: {} messages>".format(self.total_number_of_posts)
+    return "<ChatStat Object: {} messages>".format(len(self))
 
 
+  def __len__(self):
+    return self.total_number_of_posts
 
 # with open('chat.txt') as data:
 #   raw_data = data.readlines()

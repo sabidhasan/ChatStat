@@ -1,3 +1,5 @@
+import numpy
+
 class Author:
   """Class representing authors"""
   def __init__(self, name):
